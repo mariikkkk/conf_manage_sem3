@@ -1,0 +1,4 @@
+Com
+ls
+cd
+exit
