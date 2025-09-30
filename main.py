@@ -4,6 +4,84 @@ import getpass                                                              # Д
 import socket                                                               # Для имени компьютера
 import shlex                                                                # парсер, который разбивает строку как shell (учитывает кавычки)
 import argparse                                                             # Для обработки аргументов командной строки
+import zipfile                                                              # Для работы с zip файлами (чтение/запись)
+import io                                                                   # Для работы с данными в файле прямо в памяти
+import os
+from dataclasses import dataclass, field                                    # Упрощает работу, не нужно описывать init, repr
+from typing import Dict, Optional                                           # Словарь, опциональные значения
+@dataclass
+class VNode:                                                                # Хранит данные о файле или каталоге, строит дерево каталогов, добавляет файлы
+    name: str                                                               # имя элемента (файла/каталога), без полного пути
+    is_dir: bool                                                            # флаг, чтобы отличать файл от каталога
+    children: Dict[str, "Vnode"] = field(default_factory=dict)              # Дочерние узлы. Словарь (имя - узел) для каждого каталога. Создаем новый пустой словарь для каждого экземпляра
+    data: bytes = b""                                                       # Содержимое файла; для каталога - пусто
+
+    def ensure_dir(self, parts):                                            # Обеспечивает, что по пути parts существует цепочка каталогов. Возвращает узел последленго каталога
+        node = self                                                         # Начинаем с текущего узла
+        for p in parts:                                                     # Идем по пути
+            if p not in node.children:                                      # Если не нашли такой каталог
+                node.children[p] = VNode(p, True)                           # Создаем новый
+            node = node.children[p]
+            if not node.is_dir:                                             # Если не каталог (файл)
+                raise ValueError(f"Путь содержит файл как каталог: {p}")
+        return node
+    def add_file(self, parts, data: bytes):                                 # Добавляет файл по пути parts и записывает его содержимое data
+        *dirs, filename = parts
+        parent = self.ensure_dir(dirs)                                      # Находим узел родитель
+        parent.children[filename] = VNode(filename, False, data=data)       # Создаем файл
+class VFS:                                                                  # Хранит дерево узлов, имя, хеш, текущий каталог
+    def __init__(self, name: str, raw_zip_bytes: bytes, root: VNode):
+        self.name = name
+        self._raw_zip_bytes = raw_zip_bytes
+        self.root = root
+        self.cwd = "/"                                                  # Текущий рабочий каталог
+    @staticmethod
+    def from_zip_file(path: str) -> "VFS":                              # Принимает путь к зип файлу, возвращает новый объект VFS
+        try:
+            with open(path, "rb") as f:                                 # Открываем zip как бинарный файл
+                raw = f.read()                                          # Сырые байты нужны чтобы построить дерево файлов
+        except FileNotFoundError as e:
+            raise FileNotFoundError(f"VFS не найдена: {path}") from e
+        except Exception as e:
+            raise RuntimeError(f"Ошибка чтения VFS: {e}") from e
+        try:
+            root = VNode("/", True)                                      # Создаем корень дерева
+            with zipfile.ZipFile(io.BytesIO(raw), "r") as z:       # Открываем ZIP из памяти (io.BytesIO создает файлоподобный объект из raw, zipFile открывает его как архив для чтения
+                for info in z.infolist():                                # Обходим все записи архива
+                    p = info.filename                                    # путь внутри архива
+                    if p.endswith("/"):                                  # Если путь заканчивается на /, то это каталог
+                        parts = [x for x in p.strip("/").split("/") if x]# Разбиваем на части
+                        root.ensure_dir(parts)                           # Создаем каталог в дереве
+                    else:                                                # Значит это файл
+                        parts = [x for x in p.split("/") if x]           # Разбиваем на части
+                        data = z.read(info.filename)                     # Читаем содержимое файла
+                        root.add_file(parts, data)                       # Создаем файл и кладем туда байты
+        except zipfile.BadZipfile as e:                                  # zip поврежден/невалиден
+            raise ValueError("Неверный формат ZIP для VFS") from e
+        return VFS(name=os.path.basename(path), raw_zip_bytes=raw, root=root)   # Создаем объект VFS, оставляем
+
+    def default():
+        mem = io.BytesIO()              # Создаем буфер в памяти
+        with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr("readme.txt", "Hello World!\n")      # Добавляем текстовый файл
+            z.writestr("bin/", "")                          # Добавляем каталог
+            z.writestr("etc/", "")                          # Добавляем еще один каталог
+        raw = mem.getvalue()                                                    # Берем сырые байты zip
+
+        root = VNode("/", True)
+        with zipfile.ZipFile(io.BytesIO(raw),"r") as z:                   # Открываем ZIP из памяти (io.BytesIO создает файлоподобный объект из raw, zipFile открывает его как архив для чтения
+            for info in z.infolist():                                           # Обходим все записи архива
+                p = info.filename                                               # путь внутри архива
+                if p.endswith("/"):                                             # Если путь заканчивается на /, то это каталог
+                    parts = [x for x in p.strip("/").split("/") if x]           # Разбиваем на части
+                    root.ensure_dir(parts)                                      # Создаем каталог в дереве
+                else:                                                           # Значит это файл
+                    parts = [x for x in p.split("/") if x]                      # Разбиваем на части
+                    data = z.read(info.filename)                                # Читаем содержимое файла
+                    root.add_file(parts, data)                                  # Создаем файл и кладем туда байты
+        return VFS(name="default.zip", raw_zip_bytes=raw, root=root)            # Создаем объект VFS, оставляем
+
+
 
 
 class EmulatorOs:
@@ -29,10 +107,26 @@ class EmulatorOs:
 
         self.log(f"[debug] vfs = {self.vfs_path}, script = {self.script_path}") # Отладочный вывод параметров
 
+        self.vfs: Optional[VFS] = None                                          # объявляем поле для VFS
+        self._init_vfs(vfs_path)                                                # пробуем загрузить zip или создаем дефолт
+
         if self.script_path:
             self.run_startup_script(self.script_path)                           # Запускаем стартовый скрипт
 
-
+    def _init_vfs(self, vfs_path: Optional[str]):
+        try:
+            if vfs_path:
+                self.vfs = VFS.from_zip_file(vfs_path)                      # Грузим зип из диска
+                self.log(f"[VFS] Загружена '{self.vfs.name}'")
+            else:
+                self.vfs = VFS.default()
+                self.log("[VFS] Создана дефолтная VFS")
+        except FileNotFoundError as e:
+            self.log(f"[Ошибка] {e}")
+        except ValueError as e:
+            self.log(f"[Ошибка] {e}")
+        except Exception as e:
+            self.log(f"[Ошибка] Не удалось инициализировать VFS: {e}")
     def log(self, msg):                                                     # Вывод текста
         self.text.configure(state='normal')                                 # Доступный для записи
         self.text.insert(tk.END, msg + "\n")                                # Перенос строки в конце сообщения
@@ -72,7 +166,7 @@ class EmulatorOs:
         if not line:
             return
 
-        self.log(f"> {line}")                                               # Печатаем строку
+        self.log(f">{getpass.getuser()}@{socket.gethostname()} {line}")                                               # Печатаем строку
 
         cmd, args = self.parse_cmd(line)
         if cmd:
@@ -102,8 +196,8 @@ class EmulatorOs:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Stage 2")
-    parser.add_argument("--vfs", help="Путь к вирутальной файловой системе", default=None)
+    parser = argparse.ArgumentParser(description="Stage 3")
+    parser.add_argument("--vfs", help="Путь к ZIP-файлу виртуальной ФС", default=None)
     parser.add_argument("--script", help="Путь к стартовому скрипту", default=None)
     args = parser.parse_args()
 
