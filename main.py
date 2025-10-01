@@ -29,12 +29,86 @@ class VNode:                                                                # Х
         *dirs, filename = parts
         parent = self.ensure_dir(dirs)                                      # Находим узел родитель
         parent.children[filename] = VNode(filename, False, data=data)       # Создаем файл
+
+
 class VFS:                                                                  # Хранит дерево узлов, имя, хеш, текущий каталог
     def __init__(self, name: str, raw_zip_bytes: bytes, root: VNode):
         self.name = name
         self._raw_zip_bytes = raw_zip_bytes
         self.root = root
         self.cwd = "/"                                                  # Текущий рабочий каталог
+    def _normalize_path(self, path: Optional[str]):
+        if not path or path == ".":                                     # Пустой путь или текущий каталог
+            current = self.cwd
+        elif path.startswith("/"):                                      # Если абсолютный путь, то берем как есть
+            current = path
+        else:                                                           # Относительный путь надо присоединить к текущему каталогу self.cwd
+            current = self.cwd.rstrip("/") + "/" + path if self.cwd != "/" else "/" + path      # Если cwd == "/", то делаем "/" + path, иначе делаем очистку переднего слеша + "/" + path
+        parts = []
+        for part in current.split("/"):
+            if part == "" or part == ".":
+                continue
+            if part == "..":
+                if parts:
+                    parts.pop()
+                continue
+            parts.append(part)
+        return "/" + "/".join(parts) if parts else "/"
+
+
+    def _get_node(self, abs_path: str):
+        if abs_path == "/":
+            return self.root
+        node = self.root
+        for p in abs_path.strip("/").split("/"):
+            if not node.is_dir or p not in node.children:
+                raise FileNotFoundError(f"Путь не найден: {abs_path}")
+            node = node.children[p]
+        return node
+
+
+    def _iter_dir_children(self, dir_node: VNode):
+        if not dir_node.is_dir:
+            raise NotADirectoryError("Не каталог")
+        for name, child in dir_node.children.items():
+            yield name, child
+
+    def ls(self, path = "."):
+        target = self._normalize_path(path)
+        node = self._get_node(target)
+        if not node.is_dir:
+            raise NotADirectoryError(f"'{target}' не является директорией")
+        items =[]
+        for name, child in self._iter_dir_children(node):
+            t = "d" if child.is_dir else "f"
+            items.append((t, name))
+        items.sort(key=lambda x: (x[0] != "d", x[1]))               # Сначала каталоги, потом файлы
+        return items, target
+    def cd(self, path):
+        target = self._normalize_path(path or "/")
+        node = self._get_node(target)
+        if not node.is_dir:
+            raise NotADirectoryError(f"'{target}' не является директорией")
+        self.cwd = target
+    def read_text(self, path):
+        abs_path = self._normalize_path(path)
+        node = self._get_node(abs_path)
+        if node.is_dir:
+            raise NotADirectoryError(f"'{abs_path}' является директорией")
+        return node.data.decode("utf-8", errors="replace")
+    def du_total(self, path):
+        abs_path = self._normalize_path(path)
+        node = self._get_node(abs_path)
+
+        def walk_size(n: VNode):
+            if not n.is_dir:
+                return len(n.data)
+            total = 0
+            for child in n.children.values():
+                total += walk_size(child)
+            return total
+        return walk_size(node), abs_path
+
     @staticmethod
     def from_zip_file(path: str) -> "VFS":                              # Принимает путь к зип файлу, возвращает новый объект VFS
         try:
@@ -145,11 +219,87 @@ class EmulatorOs:
 
     def execute(self, cmd, args):
         if cmd == "ls":
-            self.log(f"ls - args: {args}")
-            return True
+            if not self.vfs:
+                self.log("VFS не инициализирована")
+                return False
+            try:
+                path = args[0] if args else "."
+                items, target = self.vfs.ls(path)
+                self.log(f"Содержимое {target}:")
+                if not items:
+                    self.log("<Пусто>")
+                else:
+                    for t, name in items:
+                        self.log(f"{t} {name}")
+                return True
+            except Exception as e:
+                self.log(f"Ошибка: {e}")
+                return False
         elif cmd == "cd":
-            self.log(f"cd - args: {args}")
-            return True
+            if not self.vfs:
+                self.log("VFS не инициализирована")
+                return False
+            try:
+                path = args[0] if args else None
+                self.vfs.cd(path)
+                self.log(f"Текущая директория: {self.vfs.cwd}")
+                return True
+            except Exception as e:
+                self.log(f"Ошибка: {e}")
+                return False
+        elif cmd == "tac":
+            if not self.vfs:
+                self.log("VFS не инициализирована")
+                return False
+            if not args:
+                self.log("Введите аргумент: tac <file>")
+                return False
+            try:
+                text = self.vfs.read_text(args[0])
+                lines = text.splitlines()
+                for line in reversed(lines):
+                    self.log(line)
+                return True
+            except Exception as e:
+                self.log(f"Ошибка: {e}")
+                return False
+        elif cmd == "head":
+            if not self.vfs:
+                self.log("VFS не инициализирована")
+                return False
+            if not args:
+                self.log("Использование: head [-n N] <file>")
+                return False
+            try:
+                n = 10
+                file_arg = None
+                if len(args) >= 3 and args[0] == -n:
+                    n = int(args[1])
+                    file_arg = args[2]
+                elif len(args) == 2 and args[0].isdigit():
+                    n = int(args[0])
+                    file_arg = args[1]
+                else:
+                    file_arg = args[0]
+                text = self.vfs.read_text(file_arg)
+                for line in text.splitlines()[: max(0, n)]:
+                    self.log(line)
+                return True
+            except Exception as e:
+                self.log(f"Ошибка: {e}")
+                return False
+        elif cmd == "du":
+            if not self.vfs:
+                self.log("VFS не инициализирована")
+                return False
+            try:
+                path = args[0] if args else "."
+                total, abs_path = self.vfs.du_total(path)
+                self.log(f"{total} bytes\t{abs_path}")
+                return True
+            except Exception as e:
+                self.log(f"Ошибка: {e}")
+                return False
         elif cmd == "exit":
             self.log("Завершение работы...")
             self.root.quit()
@@ -196,7 +346,7 @@ class EmulatorOs:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Stage 3")
+    parser = argparse.ArgumentParser(description="Stage 4")
     parser.add_argument("--vfs", help="Путь к ZIP-файлу виртуальной ФС", default=None)
     parser.add_argument("--script", help="Путь к стартовому скрипту", default=None)
     args = parser.parse_args()
