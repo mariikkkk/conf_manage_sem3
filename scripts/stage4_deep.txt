@@ -1,0 +1,29 @@
+# 0) обзор
+cd /
+ls
+
+# 1) переходы по уровням
+cd lvl1
+ls
+cd lvl2
+ls
+cd lvl3
+ls
+
+# 2) head/tac на глубоком файле
+head readme.txt
+tac readme.txt
+
+# 3) du: на уровне каталога и выше
+du .
+cd /
+du lvl1
+du /
+
+# 4) ошибки (ожидаются)
+# cd в файл
+cd /lvl1/lvl2/lvl3/readme.txt
+# head по каталогу
+head /lvl1
+# ls по файлу
+ls /lvl1/lvl2/lvl3/readme.txt
