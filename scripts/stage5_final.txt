@@ -1,0 +1,55 @@
+# 0) База: дефолтная VFS 
+ls
+du /
+
+# 1) head / tac  
+head readme.txt
+head -n 1 readme.txt
+tac readme.txt
+
+# 2) mkdir: корректные сценарии
+mkdir -p newdir/sub/inner
+ls
+ls newdir
+ls newdir/sub
+ls newdir/sub/inner
+du newdir
+
+# повторный -p (не ошибка)
+mkdir -p newdir/sub/inner
+
+# несколько каталогов за раз (не ошибка)
+mkdir d1 d2
+ls
+
+# 3) cd и нормализация путей
+cd newdir
+cd sub
+ls .
+cd ../..
+ls /
+cd /newdir/sub/./inner
+ls .
+cd /
+
+# ) du на разных уровнях (всё ок)
+du /
+du newdir
+du newdir/sub
+du newdir/sub/inner
+du d1
+
+# mkdir без -p, каталог уже существует 
+# mkdir newdir
+
+# cd в файл 
+# cd readme.txt
+
+# ls по файлу 
+# ls readme.txt
+
+# head по каталогу 
+# head newdir
+
+# du по несуществующему пути
+du /no/such/path

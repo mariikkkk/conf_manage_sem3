@@ -55,7 +55,6 @@ class VFS:                                                                  # Х
             parts.append(part)
         return "/" + "/".join(parts) if parts else "/"
 
-
     def _get_node(self, abs_path: str):
         if abs_path == "/":
             return self.root
@@ -109,6 +108,41 @@ class VFS:                                                                  # Х
             return total
         return walk_size(node), abs_path
 
+
+    def mkdir(self, path, parents):
+        abs_path = self._normalize_path(path)
+        if abs_path == "/":
+            raise FileExistsError("Корень '/' уже существует")
+
+        parts = [p for p in abs_path.strip('/').split('/') if p]
+        parent = self.root
+
+        *dirs, last = parts
+
+        for seg in dirs:
+            if seg in parent.children:
+                node = parent.children[seg]
+                if not node.is_dir:
+                    raise NotADirectoryError(f"На пути встречен файл как каталог: /{'/'.join(parts[:parts.index(seg)+1])}")
+                parent = node
+            else:
+                if parents:
+                    parent.children[seg] = VNode(seg, True)
+                    parent = parent.children[seg]
+                else:
+                    raise FileNotFoundError(f"Путь не найден: /{'/'.join(dirs)}")
+        if last in parent.children:
+            node = parent.children[last]
+            if node.is_dir:
+                if parents:
+                    return abs_path
+                raise FileExistsError(f"Файл уже существует: {abs_path}")
+            else:
+                raise FileExistsError(f"Файл уже существует: {abs_path}")
+        else:
+            parent.children[last] = VNode(last, True)
+            return abs_path
+
     @staticmethod
     def from_zip_file(path: str) -> "VFS":                              # Принимает путь к зип файлу, возвращает новый объект VFS
         try:
@@ -130,11 +164,11 @@ class VFS:                                                                  # Х
                         parts = [x for x in p.split("/") if x]           # Разбиваем на части
                         data = z.read(info.filename)                     # Читаем содержимое файла
                         root.add_file(parts, data)                       # Создаем файл и кладем туда байты
-        except zipfile.BadZipfile as e:                                  # zip поврежден/невалиден
+        except zipfile.BadZipFile as e:                                  # zip поврежден/невалиден
             raise ValueError("Неверный формат ZIP для VFS") from e
         return VFS(name=os.path.basename(path), raw_zip_bytes=raw, root=root)   # Создаем объект VFS, оставляем
 
-    def default():
+    def default() -> "VFS":
         mem = io.BytesIO()              # Создаем буфер в памяти
         with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
             z.writestr("readme.txt", "Hello World!\n")      # Добавляем текстовый файл
@@ -166,31 +200,31 @@ class EmulatorOs:
         user = getpass.getuser()
         host = socket.gethostname()
 
-        self.root = tk.Tk()                                                 # Создаем окно
+        self.root = tk.Tk()                                                                                         # Создаем окно
         self.root.configure(bg="black")
-        self.root.title(f'Эмулятор - [{user}@{host}]')                      # Заголовок окна
+        self.root.title(f'Эмулятор - [{user}@{host}]')                                                              # Заголовок окна
         self.text = scrolledtext.ScrolledText(self.root, wrap=tk.WORD, state='disabled', height=20, width=80, bg="black", fg="green")
         # pack - менеджер геометрии (упорядочивает виджеты по пакетам), padx/pady - отступ по гориз./вертикал., fill - как растянуть виджет, expand - доп пространство родителя
         self.text.pack(padx=6, pady=6, fill=tk.BOTH, expand=True)
 
-        self.input_var = tk.StringVar()                                     # Объект, который хранит строковое значение
-        self.entry = tk.Entry(self.root, textvariable=self.input_var, bg="black", fg="green")       # Однострочное поле для ввода команд
-        self.entry.bind('<Return>', self.on_enter)                          # При нажатии Enter
+        self.input_var = tk.StringVar()                                                                             # Объект, который хранит строковое значение
+        self.entry = tk.Entry(self.root, textvariable=self.input_var, bg="black", fg="green")                       # Однострочное поле для ввода команд
+        self.entry.bind('<Return>', self.on_enter)                                                                  # При нажатии Enter
         self.entry.pack(fill=tk.X, padx=6, pady=(0, 6))
-        self.entry.focus()                                                  # Курсор сразу в поле ввода
+        self.entry.focus()                                                                                          # Курсор сразу в поле ввода
 
-        self.log(f"[debug] vfs = {self.vfs_path}, script = {self.script_path}") # Отладочный вывод параметров
+        self.log(f"[debug] vfs = {self.vfs_path}, script = {self.script_path}")                                     # Отладочный вывод параметров
 
-        self.vfs: Optional[VFS] = None                                          # объявляем поле для VFS
-        self._init_vfs(vfs_path)                                                # пробуем загрузить zip или создаем дефолт
+        self.vfs: Optional[VFS] = None                                                                              # объявляем поле для VFS
+        self._init_vfs(vfs_path)                                                                                    # пробуем загрузить zip или создаем дефолт
 
         if self.script_path:
-            self.run_startup_script(self.script_path)                           # Запускаем стартовый скрипт
+            self.run_startup_script(self.script_path)                                                               # Запускаем стартовый скрипт
 
     def _init_vfs(self, vfs_path: Optional[str]):
         try:
             if vfs_path:
-                self.vfs = VFS.from_zip_file(vfs_path)                      # Грузим зип из диска
+                self.vfs = VFS.from_zip_file(vfs_path)                                                              # Грузим зип из диска
                 self.log(f"[VFS] Загружена '{self.vfs.name}'")
             else:
                 self.vfs = VFS.default()
@@ -201,6 +235,7 @@ class EmulatorOs:
             self.log(f"[Ошибка] {e}")
         except Exception as e:
             self.log(f"[Ошибка] Не удалось инициализировать VFS: {e}")
+
     def log(self, msg):                                                     # Вывод текста
         self.text.configure(state='normal')                                 # Доступный для записи
         self.text.insert(tk.END, msg + "\n")                                # Перенос строки в конце сообщения
@@ -273,7 +308,7 @@ class EmulatorOs:
             try:
                 n = 10
                 file_arg = None
-                if len(args) >= 3 and args[0] == -n:
+                if len(args) >= 3 and args[0] == "-n":
                     n = int(args[1])
                     file_arg = args[2]
                 elif len(args) == 2 and args[0].isdigit():
@@ -300,6 +335,36 @@ class EmulatorOs:
             except Exception as e:
                 self.log(f"Ошибка: {e}")
                 return False
+        elif cmd == "mkdir":
+            if not self.vfs:
+                self.log("VFS не инициализирована")
+                return False
+            if not args:
+                self.log("Использование: mkdir [-p] <dir> [<dir2> ...]")
+                return False
+            try:
+                parents = False
+                paths = []
+                for a in args:
+                    if a == "-p":
+                        parents = True
+                    else:
+                        paths.append(a)
+                if not paths:
+                    self.log("Использование: mkdir [-p] <dir> [<dir2> ...]")
+                    return False
+                had_errors = False
+                for p in paths:
+                    try:
+                        created = self.vfs.mkdir(p, parents=parents)
+                        self.log(f"mkdir: ok: {created}")
+                    except Exception as e:
+                        self.log(f"Ошибка: {e}")
+                        had_errors = True
+                return not had_errors
+            except Exception as e:
+                self.log(f"Ошибка: {e}")
+                return False
         elif cmd == "exit":
             self.log("Завершение работы...")
             self.root.quit()
@@ -310,17 +375,19 @@ class EmulatorOs:
 
     def run(self):
         self.root.mainloop()
+
     def on_enter(self, event):
         line = self.input_var.get().strip()                                 # Берем строку из StringVar, удаляем пробелы с начала и конца строки
         self.input_var.set("")                                              # Очищаем поле ввода
         if not line:
             return
 
-        self.log(f">{getpass.getuser()}@{socket.gethostname()} {line}")                                               # Печатаем строку
+        self.log(f"> {getpass.getuser()}@{socket.gethostname()}: {line}")                                               # Печатаем строку
 
         cmd, args = self.parse_cmd(line)
         if cmd:
             self.execute(cmd, args)
+
     def run_startup_script(self, path):
         try:
             with open(path, "r", encoding="utf-8") as f:                # with сам закроет файл, "r" - режим чтения
@@ -328,7 +395,7 @@ class EmulatorOs:
                     line = raw_line.strip()
                     if not line or line.startswith("#"):
                         continue
-                    self.log(f"> {line}")                               # Имитация ввода пользователя
+                    self.log(f"> {getpass.getuser()}@{socket.gethostname()}: {line}")                               # Имитация ввода пользователя
                     cmd, args = self.parse_cmd(line)
                     if not cmd:
                         self.log(f"[Ошибка в строке {lineno}] Парсинг команды не удался.")
@@ -343,10 +410,8 @@ class EmulatorOs:
             self.log(f"[Ошибка] При чтении скрипта возникла ошибка: {e}")
 
 
-
-
 def main():
-    parser = argparse.ArgumentParser(description="Stage 4")
+    parser = argparse.ArgumentParser(description="Stage 5")
     parser.add_argument("--vfs", help="Путь к ZIP-файлу виртуальной ФС", default=None)
     parser.add_argument("--script", help="Путь к стартовому скрипту", default=None)
     args = parser.parse_args()
@@ -354,4 +419,5 @@ def main():
     app = EmulatorOs(vfs_path=args.vfs, script_path=args.script)
     app.run()
 
-main()
+if __name__ == "__main__":      # Чтобы при импорте программа не запустилась автоматически
+    main()
