@@ -40,21 +40,15 @@
 - `python app.py --script scripts/stage5_demo.txt` - выполнение стартового скрипта 
 - `python app.py --vfs vfs_deep.zip --script scripts/stage4_main.txt` - тестирование с глубокой структурой 
 
-Примеры команд
+Примеры команд:
 
-ls
-
-cd etc
-
-head -n 5 readme.txt
-
-tac readme.txt
-
-du /
-
-mkdir -p test/inner
-
-ls test
+- ls
+- cd etc
+- head -n 5 readme.txt
+- tac readme.txt
+- du /
+- mkdir -p test/inner
+- ls test
 
 Виртуальная файловая система (VFS)
 
