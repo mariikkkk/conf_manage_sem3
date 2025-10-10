@@ -43,11 +43,17 @@
 Примеры команд
 
 ls
+
 cd etc
+
 head -n 5 readme.txt
+
 tac readme.txt
+
 du /
+
 mkdir -p test/inner
+
 ls test
 
 Виртуальная файловая система (VFS)
